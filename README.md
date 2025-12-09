@@ -6,12 +6,11 @@ I want her to have "mood settings" so that i can choose Curie's mood to match mi
 Apart from this i want Curie to be highly customizable, perhaps through an app. For example, i want Curie to be able to reference memes that are popular and trending at this time freely based on the "Humor Setting" set by the user. 
 This is a long term project and i will keep adding features to her as i get new ideas.
 
-<img width="635" height="751" alt="image" src="https://github.com/user-attachments/assets/7f9b1ed6-d8ab-4d0d-b927-685365b9b905" /> 
+<img width="635" height="751" alt="image" src="https://github.com/user-attachments/assets/7f9b1ed6-d8ab-4d0d-b927-685365b9b905" />
 
-https://github.com/user-attachments/assets/f91970c1-08cb-4505-9238-51313d4abb2b
+https://github.com/user-attachments/assets/d7ebbfcd-b926-4155-a5d6-0cbab540a420
 
-
-
+ 
 
 
 # WIRING
