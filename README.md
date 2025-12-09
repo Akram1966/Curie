@@ -1,4 +1,4 @@
-#DESCRIPTION
+# DESCRIPTION
 
 Curie is a cute desk companion robot. Its physical body consists of 3 servos to give it 3 dof, 2 touch capacitive touch sensors which allow you to pet it, and an oled screen to display its cute eyes.
 My goal is to be able to speak to Curie through AI, preferably trough an api key and not locally as i want it to have access to the internet.
@@ -10,34 +10,34 @@ This is a long term project and i will keep adding features to her as i get new 
 
 
 
-#WIRING
+# WIRING
 
-###OLED Display (I2C)
+### OLED Display (I2C)
 VCC -> 3.3V Pin on ESP32
 GND -> GND Pin on ESP32
 SDA -> GPIO 21 on ESP32
 SCL -> GPIO 22 on ESP32
 
-###Servo 1 (X-Axis, Pan)
+### Servo 1 (X-Axis, Pan)
 VCC (Red wire) -> External 5V Power (+)
 GND (Brown/Black wire) -> GND Pin on ESP32
 Data (Orange/Yellow wire) -> GPIO 12 on ESP32
 
-###Servo 2 (Y-Axis, Tilt)
+### Servo 2 (Y-Axis, Tilt)
 VCC (Red wire) -> External 5V Power (+)
 GND (Brown/Black wire) -> GND Pin on ESP32
 Data (Orange/Yellow wire) -> GPIO 13 on ESP32
 
-###TTP223 Touch Sensor
+### TTP223 Touch Sensor
 VCC -> 3.3V Pin on ESP32
 GND -> GND Pin on ESP32
 I/O (or SIG) -> GPIO 18 on ESP32
 
-###External 5V Power
+### External 5V Power
 7.4V li-po
 use buck converter to step downt to 5V
 
-#BODY
+# BODY
 
 modified a servo bracket meant for 2-axis fpv control. Working on a new design that can incorporate 3 dof which will be 3d printed.
 https://amzn.in/d/41nkgiY
