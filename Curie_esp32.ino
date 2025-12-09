@@ -1,209 +1,210 @@
-#include <Wire.h>          // Must be included before Adafruit_GFX
+// --- PREREQUISITE LIBRARIES ---
+#include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h> // IMPORTANT: Re-include for constants and the global 'display' object
+#include <Adafruit_SSD1306.h>
+#include <ESP32Servo.h>
 
-// Define display parameters
+// --- HARDWARE AND SCREEN DEFINITIONS ---
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1 
-
-// --- ESP32 Specific Pin Definitions ---
 const int OLED_SDA_PIN = 21; 
 const int OLED_SCL_PIN = 22; 
-const int SERVO_X_PIN = 13; 
-const int SERVO_Y_PIN = 12; 
+const int SERVO_X_PIN = 12; 
+const int SERVO_Y_PIN = 13; 
+const int TOUCH_SENSOR_PIN = 18; // GPIO 18 (D18)
 
-// GLOBAL DISPLAY OBJECT
+// --- STEP 1: CREATE THE GLOBAL DISPLAY OBJECT ---
+// CORRECTED LINE: The object is now correctly named I2C_OLED
 TwoWire I2C_OLED = TwoWire(0);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &I2C_OLED, OLED_RESET);
 
-// Include RoboEyes library
+// --- STEP 2: INCLUDE THE ROBOEYES LIBRARY ---
 #include <FluxGarage_RoboEyes.h>
 
-// RoboEyes instance
+// --- STEP 3: CREATE OTHER GLOBAL OBJECTS ---
 roboEyes robotEyes;
-
-// Use the ESP32-specific servo library
-#include <ESP32Servo.h>
-
-// Servos
 Servo servoX; 
 Servo servoY; 
 
-// --- Timing and Movement Parameters ---
-// How long to wait between starting new movements
-const unsigned long ACTION_INTERVAL = 5000; 
-unsigned long lastActionTime = 0;
+// --- STATE MACHINE FOR LOCAL MOOD ---
+enum RobotMood { MOOD_NEUTRAL, MOOD_HAPPY, MOOD_ANGRY };
+RobotMood currentMood = MOOD_NEUTRAL;
 
-// Parameters for smooth servo movement
-const int MIN_MOVEMENT_DURATION = 800;  // ms
-const int MAX_MOVEMENT_DURATION = 2000; // ms
+// --- Timers for Mood Changes ---
+const unsigned long timeUntilAngry = 5000;  // 5 seconds
+const unsigned long happyDuration = 3000;   // Stay happy for 3 seconds
+unsigned long lastTouchTime = 0;
+unsigned long happyStartTime = 0;
+int lastTouchState = LOW;
 
-// State variables for managing the smooth movement
+// --- Variables for LLM "Talking" Animation ---
+bool isTalking = false;
+unsigned long lastTalkMoveTime = 0;
+int talkMoveInterval = 150; 
+int currentYAngle = 90;
+int talkBobAmount = 5;
+
+// --- State variables for Smooth Servo Movement ---
 bool isMoving = false;
 unsigned long movementStartTime;
 unsigned long movementDuration;
-
+const int MIN_MOVEMENT_DURATION = 1000; // ms
+const int MAX_MOVEMENT_DURATION = 2500; // ms
 int servoX_startAngle;
 int servoX_targetAngle;
 int servoY_startAngle;
 int servoY_targetAngle;
 
-// Enum for eye expressions (using the ones confirmed to work)
-enum EyeExpression {
-  EXPRESSION_IDLE,
-  EXPRESSION_DEFAULT_MOOD,
-  EXPRESSION_HAPPY_MOOD,
-  EXPRESSION_ANGRY_MOOD,
-  EXPRESSION_LAUGH_ANIM,
-  NUM_EXPRESSIONS 
-};
-
-// Function to set a random eye expression
-void setRandomExpression() {
-  int randomExpression = random(NUM_EXPRESSIONS);
-
-  robotEyes.setIdleMode(OFF);
-  robotEyes.setMood(DEFAULT);
-
-  switch (randomExpression) {
-    case EXPRESSION_IDLE:
-      Serial.println("Setting expression: IDLE");
-      robotEyes.setIdleMode(ON, 2, 2);
-      break;
-    case EXPRESSION_DEFAULT_MOOD:
-      Serial.println("Setting expression: DEFAULT_MOOD");
-      robotEyes.setMood(DEFAULT);
-      break;
-    case EXPRESSION_HAPPY_MOOD:
-      Serial.println("Setting expression: HAPPY_MOOD");
-      robotEyes.setMood(HAPPY);
-      break;
-    case EXPRESSION_ANGRY_MOOD:
-      Serial.println("Setting expression: ANGRY_MOOD");
-      robotEyes.setMood(ANGRY);
-      break;
-    case EXPRESSION_LAUGH_ANIM:
-      Serial.println("Setting expression: LAUGH_ANIM");
-      robotEyes.setMood(HAPPY);
-      robotEyes.anim_laugh(); 
-      break;
-  }
-}
-
-// Function to update the servo positions smoothly over time
-void updateServoMovement() {
-  // If we are not currently in a movement, check if it's time to start a new one.
-  if (!isMoving) {
-    if (millis() - lastActionTime >= ACTION_INTERVAL) {
-      // It's time to start a new movement!
-      isMoving = true;
-      movementStartTime = millis();
-      movementDuration = random(MIN_MOVEMENT_DURATION, MAX_MOVEMENT_DURATION);
-
-      // The new start angle is whatever the previous target was
-      servoX_startAngle = servoX_targetAngle;
-      servoY_startAngle = servoY_targetAngle;
-
-      // Pick a new random target angle
-      servoX_targetAngle = random(30, 150);
-      servoY_targetAngle = random(30, 150);
-
-      Serial.printf("New movement! X: %d -> %d, Y: %d -> %d over %lu ms\n", 
-                    servoX_startAngle, servoX_targetAngle, 
-                    servoY_startAngle, servoY_targetAngle, movementDuration);
-
-      // Also change the expression at the start of a new movement
-      setRandomExpression();
-    }
-    return; // Nothing to do if not moving and not time to start
-  }
-
-  // --- If we are here, we are in the middle of a movement ---
-  unsigned long elapsedTime = millis() - movementStartTime;
-
-  if (elapsedTime >= movementDuration) {
-    // Movement is complete
-    servoX.write(servoX_targetAngle);
-    servoY.write(servoY_targetAngle);
-    isMoving = false;
-    lastActionTime = millis(); // Reset the timer for the next idle period
-    Serial.println("Movement complete.");
-    return;
-  }
-
-  // Calculate movement progress as a fraction from 0.0 to 1.0
-  float progress = (float)elapsedTime / (float)movementDuration;
-
-  // --- The Easing Function (Ease In, Ease Out using a Cosine curve) ---
-  // This formula transforms the linear progress into a smooth curve
-  float easedProgress = (1.0 - cos(progress * PI)) / 2.0;
-
-  // Calculate the new angle based on the eased progress
-  int newAngleX = servoX_startAngle + (servoX_targetAngle - servoX_startAngle) * easedProgress;
-  int newAngleY = servoY_startAngle + (servoY_targetAngle - servoY_startAngle) * easedProgress;
-
-  // Write the new intermediate angle to the servos
-  servoX.write(newAngleX);
-  servoY.write(newAngleY);
-}
-
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n--- Starting RoboEyes ESP32 Companion (Smooth Movement Edition) ---");
+  pinMode(TOUCH_SENSOR_PIN, INPUT);
 
-  // OLED Initialization
-  I2C_OLED.begin(OLED_SDA_PIN, OLED_SCL_PIN, 400000); 
-
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false)) { 
-    Serial.println("❌ OLED not detected at 0x3C, trying 0x3D...");
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3D, false)) {
-      Serial.println("❌ OLED not detected at 0x3D either. Halting.");
-      for (;;) delay(1000); 
-    } else {
-      Serial.println("✅ OLED connected and working at 0x3D!");
-    }
-  } else {
-    Serial.println("✅ OLED connected and working at 0x3C!");
-  }
-  
+  // --- OLED, RoboEyes, and Servo setup ---
+  I2C_OLED.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   display.clearDisplay();
   display.display();
 
-  // RoboEyes Setup
-  robotEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 0xFF); 
+  robotEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 0xFF);
   robotEyes.setAutoblinker(ON, 3, 2);
-  robotEyes.setIdleMode(OFF);
   robotEyes.setWidth(36, 36);
   robotEyes.setHeight(36, 36);
   robotEyes.setBorderradius(8, 8);
   robotEyes.setSpacebetween(10);
-  robotEyes.setMood(DEFAULT);
-
-  // Servo Setup
+  
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
-  ESP32PWM::allocateTimer(2);
-  ESP32PWM::allocateTimer(3); 
   servoX.setPeriodHertz(50); 
   servoY.setPeriodHertz(50); 
   servoX.attach(SERVO_X_PIN, 500, 2400); 
   servoY.attach(SERVO_Y_PIN, 500, 2400); 
 
-  // Initialize servo positions
+  // Initialize servo positions for smooth movement
   servoX_targetAngle = 90;
   servoY_targetAngle = 90;
   servoX.write(servoX_targetAngle);
   servoY.write(servoY_targetAngle);
 
-  // Initialize timing
-  lastActionTime = millis();
+  lastTouchTime = millis();
+  currentMood = MOOD_NEUTRAL;
+  robotEyes.setMood(DEFAULT);
+  Serial.println("Curie is online. Moving and waiting for interaction...");
+}
+
+// Handles commands from the Python "Brain" script
+void handleSerialCommand(String cmd) {
+  cmd.trim();
+  if (cmd.startsWith("MOOD:")) {
+    String moodStr = cmd.substring(5);
+    lastTouchTime = millis(); 
+    if (moodStr == "HAPPY") {
+      robotEyes.setMood(HAPPY);
+      currentMood = MOOD_HAPPY;
+      happyStartTime = millis();
+    } else if (moodStr == "ANGRY") {
+      robotEyes.setMood(ANGRY);
+      currentMood = MOOD_ANGRY;
+    } else {
+      robotEyes.setMood(DEFAULT);
+      currentMood = MOOD_NEUTRAL;
+    }
+  } else if (cmd.startsWith("TALK:")) {
+    String talkCmd = cmd.substring(5);
+    if (talkCmd == "START") {
+      isTalking = true;
+      isMoving = false; // Stop random movement to start talking
+      currentYAngle = servoY.read();
+    } else if (talkCmd == "STOP") {
+      isTalking = false;
+    }
+  }
+}
+
+// Manages Curie's mood based on touch and time
+void updateMood() {
+  int currentTouchState = digitalRead(TOUCH_SENSOR_PIN);
+  if (currentTouchState == HIGH && lastTouchState == LOW) {
+    currentMood = MOOD_HAPPY;
+    robotEyes.setMood(HAPPY);
+    lastTouchTime = millis();
+    happyStartTime = millis();
+  }
+  lastTouchState = currentTouchState;
+
+  switch (currentMood) {
+    case MOOD_HAPPY:
+      if (millis() - happyStartTime > happyDuration) {
+        currentMood = MOOD_NEUTRAL;
+        robotEyes.setMood(DEFAULT);
+      }
+      break;
+    case MOOD_NEUTRAL:
+      if (millis() - lastTouchTime > timeUntilAngry) {
+        Serial.println("No interaction. Becoming angry!");
+        currentMood = MOOD_ANGRY;
+        robotEyes.setMood(ANGRY);
+      }
+      break;
+    case MOOD_ANGRY:
+      // Stays angry until touched.
+      break;
+  }
+}
+
+// Manages smooth, random head movements when not talking
+void updateServoMovement() {
+  if (!isMoving) {
+    // If not moving, start a new movement
+    isMoving = true;
+    movementStartTime = millis();
+    movementDuration = random(MIN_MOVEMENT_DURATION, MAX_MOVEMENT_DURATION);
+    servoX_startAngle = servoX_targetAngle;
+    servoY_startAngle = servoY_targetAngle;
+    servoX_targetAngle = random(45, 135);
+    servoY_targetAngle = random(70, 110);
+    return;
+  }
+
+  unsigned long elapsedTime = millis() - movementStartTime;
+  if (elapsedTime >= movementDuration) {
+    // Movement is complete
+    servoX.write(servoX_targetAngle);
+    servoY.write(servoY_targetAngle);
+    isMoving = false; // Get ready to start a new movement on the next cycle
+    return;
+  }
+
+  float progress = (float)elapsedTime / (float)movementDuration;
+  // The Easing Function (Ease In, Ease Out using a Cosine curve)
+  float easedProgress = (1.0 - cos(progress * PI)) / 2.0;
+  int newAngleX = servoX_startAngle + (servoX_targetAngle - servoX_startAngle) * easedProgress;
+  int newAngleY = servoY_startAngle + (servoY_targetAngle - servoY_startAngle) * easedProgress;
+  servoX.write(newAngleX);
+  servoY.write(newAngleY);
 }
 
 void loop() {
-  // Always update the eyes for animations and blinking
-  robotEyes.update(); 
-  
-  // Constantly update the servo movement. This function handles all the logic.
-  updateServoMovement();
+  robotEyes.update(); // Update eye animations
+
+  if (Serial.available()) {
+    handleSerialCommand(Serial.readStringUntil('\n')); // Check for LLM commands
+  }
+
+  updateMood(); // Update mood based on touch
+
+  // --- MOVEMENT LOGIC ---
+  if (isTalking) {
+    // If talking, do the head-bob animation
+    if (millis() - lastTalkMoveTime > talkMoveInterval) {
+      lastTalkMoveTime = millis();
+      int randomX = random(80, 100);
+      int randomY = random(currentYAngle - talkBobAmount, currentYAngle + talkBobAmount);
+      servoX.write(randomX);
+      servoY.write(randomY);
+    }
+  } else {
+    // If NOT talking, perform the smooth random "looking around" movement
+    updateServoMovement();
+  }
 }
